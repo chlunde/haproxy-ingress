@@ -13,7 +13,7 @@ ROOT_PKG=github.com/jcmoraisjr/haproxy-ingress/pkg
 
 .PHONY: build
 build:
-	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build \
+	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -v -i \
 	  -installsuffix cgo \
 	  -ldflags "-s -w -X $(ROOT_PKG)/version.RELEASE=$(TAG) -X $(ROOT_PKG)/version.COMMIT=$(GIT_COMMIT) -X $(ROOT_PKG)/version.REPO=$(GIT_REPO)" \
 	  -o rootfs/haproxy-ingress-controller \

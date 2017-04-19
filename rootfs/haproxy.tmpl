@@ -47,9 +47,9 @@ userlist {{ $userlist.ListName }}
 backend {{ $backend.Name }}
     mode http
     balance roundrobin
-{{ range $endpoint := $backend.Endpoints }}
+{{ range $endpoint, $weight := $backend.Endpoints }}
 {{ $target := (print $endpoint.Address ":" $endpoint.Port) }}
-    server {{ $target }} {{ $target }} check port {{ $endpoint.Port }} inter 2s
+    server {{ $target }} {{ $target }} check port {{ $endpoint.Port }} inter 2s weight {{ $weight }}
 {{ end }}
 {{ end }}
 

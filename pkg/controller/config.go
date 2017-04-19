@@ -18,22 +18,22 @@ package controller
 
 import (
 	"bufio"
+	"os"
+	"strings"
+
 	"github.com/golang/glog"
 	"github.com/jcmoraisjr/haproxy-ingress/pkg/types"
 	"github.com/jcmoraisjr/haproxy-ingress/pkg/utils"
 	api "k8s.io/client-go/pkg/api/v1"
 	"k8s.io/ingress/core/pkg/ingress"
 	"k8s.io/ingress/core/pkg/ingress/defaults"
-	"os"
-	"strings"
 )
 
-func newControllerConfig(cfg *ingress.Configuration, configMap *api.ConfigMap) *types.ControllerConfig {
+func newControllerConfig(cfg *ingress.Configuration, endpoints map[string]map[types.Endpoint]int, configMap *api.ConfigMap) *types.ControllerConfig {
 	userlists := newUserlists(cfg.Servers)
 	haHTTPServers, haHTTPSServers, haDefaultServer := newHAProxyServers(userlists, cfg.Servers)
 	conf := types.ControllerConfig{
 		Userlists:           userlists,
-		Backends:            cfg.Backends,
 		HTTPServers:         haHTTPServers,
 		HTTPSServers:        haHTTPSServers,
 		DefaultServer:       haDefaultServer,
@@ -42,6 +42,18 @@ func newControllerConfig(cfg *ingress.Configuration, configMap *api.ConfigMap) *
 		PassthroughBackends: cfg.PassthroughBackends,
 		Cfg:                 newHAProxyConfig(configMap),
 	}
+
+	for _, b := range cfg.Backends {
+		hapBackend := &types.Backend{
+			Name:            b.Name,
+			Secure:          b.Secure,
+			SessionAffinity: b.SessionAffinity,
+			Endpoints:       endpoints[b.Name],
+		}
+
+		conf.Backends = append(conf.Backends, hapBackend)
+	}
+
 	return &conf
 }
 

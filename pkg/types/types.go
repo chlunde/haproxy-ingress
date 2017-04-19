@@ -28,7 +28,7 @@ type (
 	// compatible with HAProxy
 	ControllerConfig struct {
 		Userlists           map[string]Userlist
-		Backends            []*ingress.Backend
+		Backends            []*Backend
 		DefaultServer       *HAProxyServer
 		HTTPServers         []*HAProxyServer
 		HTTPSServers        []*HAProxyServer
@@ -37,6 +37,30 @@ type (
 		PassthroughBackends []*ingress.SSLPassthroughBackend
 		Cfg                 *HAProxyConfig
 	}
+
+	// Backend describes one or more remote server/s (endpoints) associated with a service
+	Backend struct {
+		// Name represents an unique api.Service name formatted as <namespace>-<name>-<port>
+		Name string
+		// This indicates if the communication protocol between the backend and the endpoint is HTTP or HTTPS
+		// Allowing the use of HTTPS
+		// The endpoint/s must provide a TLS connection.
+		// The certificate used in the endpoint cannot be a self signed certificate
+		// TODO: add annotation to allow the load of ca certificate
+		Secure bool
+		// Endpoints contains the list of endpoints currently running
+		Endpoints map[Endpoint]int
+
+		// StickySession contains the StickyConfig object with stickness configuration
+
+		SessionAffinity ingress.SessionAffinityConfig
+	}
+
+	Endpoint struct {
+		Address string
+		Port    string
+	}
+
 	// HAProxyConfig has HAProxy specific configurations from ConfigMap
 	HAProxyConfig struct {
 		defaults.Backend `json:",squash"`
@@ -77,3 +101,7 @@ type (
 		HAWhitelist     string                `json:"whitelist,omitempty"`
 	}
 )
+
+func MapEndpoint(ep ingress.Endpoint) Endpoint {
+	return Endpoint{ep.Address, ep.Port}
+}
