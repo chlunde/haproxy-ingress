@@ -29,6 +29,7 @@ import (
 	"github.com/jcmoraisjr/haproxy-ingress/pkg/types"
 	"github.com/jcmoraisjr/haproxy-ingress/pkg/version"
 	"github.com/spf13/pflag"
+	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	api "k8s.io/client-go/pkg/api/v1"
 	"k8s.io/ingress/core/pkg/ingress"
 	"k8s.io/ingress/core/pkg/ingress/controller"
@@ -181,6 +182,26 @@ func (haproxy *HAProxyController) OnUpdate(cfg ingress.Configuration) ([]byte, e
 			}
 			haproxy.endpoints[backend.Name][key] = state
 		}
+
+		// Check liveness of those that were/are draining
+		for ep, _ := range haproxy.endpoints[backend.Name] {
+			state := haproxy.endpoints[backend.Name][ep]
+			// Unknown, so kubernetes can't know the state of it, delete it
+			if state.ObjectRef == nil {
+				glog.Infof("Deleting EP, we don't know the pod name: %+v", ep)
+				delete(haproxy.endpoints[backend.Name], ep)
+				continue
+			}
+
+			client := haproxy.controller.GetClient()
+			pod, err := client.CoreV1().Pods(state.ObjectRef.Namespace).Get(state.ObjectRef.Name, meta_v1.GetOptions{})
+			phase := "...unknown..."
+			if err == nil {
+				phase = string(pod.Status.Phase)
+			}
+			glog.Infof("Pod state: %+v phase=%v %v", pod, phase, err)
+		}
+
 	}
 
 	glog.Infof("%+v\n", haproxy.endpoints)

@@ -365,6 +365,11 @@ func (ic GenericController) GetDefaultBackend() defaults.Backend {
 	return ic.cfg.Backend.BackendDefaults()
 }
 
+// GetClient returns the kubernetes client
+func (ic GenericController) GetClient() clientset.Interface {
+	return ic.cfg.Client
+}
+
 // GetSecret searches for a secret in the local secrets Store
 func (ic GenericController) GetSecret(name string) (*api.Secret, error) {
 	s, exists, err := ic.secrLister.Store.GetByKey(name)
