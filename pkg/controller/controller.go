@@ -131,7 +131,6 @@ func lookupEndpoint(ep types.Endpoint, eplister store.EndpointLister) *api.Objec
 		return nil
 	}
 
-	glog.Infof("looking up: %+v\n", ep)
 	for _, m := range eplister.List() {
 		eps := *m.(*api.Endpoints)
 		for _, subset := range eps.Subsets {
@@ -141,14 +140,14 @@ func lookupEndpoint(ep types.Endpoint, eplister store.EndpointLister) *api.Objec
 				}
 				for _, port := range subset.Ports {
 					if port.Port == int32(portnumber) {
-						glog.Infof("Found targetRef: %+v, %+v, %+v\n", ep, addr.TargetRef, addr.Hostname)
+						glog.Infof("Mapped new endpoint %+v to pod %v/%v\n", ep, addr.TargetRef.Namespace, addr.TargetRef.Name)
 						return addr.TargetRef
 					}
 				}
 			}
 		}
 	}
-	glog.Infof("Did not find endpoint: %+v\n", ep)
+	glog.Infof("Did not find and pod matching endpoint: %+v\n", ep)
 	return nil
 }
 
@@ -165,9 +164,10 @@ func (haproxy *HAProxyController) OnUpdate(cfg ingress.Configuration) ([]byte, e
 		// it will be used when there are no alive endpoints for a service
 		delete(haproxy.endpoints[backend.Name], types.Endpoint{"127.0.0.1", "8181"})
 
-		// Set weight to 0 for all backends
+		// Set weight to 0 for all endpoints
 		for ep, _ := range haproxy.endpoints[backend.Name] {
 			state := haproxy.endpoints[backend.Name][ep]
+			state.PreviousWeight = state.Weight
 			state.Weight = 0
 			haproxy.endpoints[backend.Name][ep] = state
 		}
@@ -176,6 +176,7 @@ func (haproxy *HAProxyController) OnUpdate(cfg ingress.Configuration) ([]byte, e
 		for _, ep := range backend.Endpoints {
 			key := types.NewEndpoint(ep)
 			state := haproxy.endpoints[backend.Name][key]
+			state.PreviousWeight = 256
 			state.Weight = 256
 			if state.ObjectRef == nil {
 				state.ObjectRef = lookupEndpoint(key, haproxy.listers.Endpoint)
@@ -186,25 +187,37 @@ func (haproxy *HAProxyController) OnUpdate(cfg ingress.Configuration) ([]byte, e
 		// Check liveness of those that were/are draining
 		for ep, _ := range haproxy.endpoints[backend.Name] {
 			state := haproxy.endpoints[backend.Name][ep]
+
+			// Alive and Running (not terminating), skip it
+			if state.Weight != 0 {
+				continue
+			}
+
+			if state.PreviousWeight != 0 {
+				glog.Infof("%v: Entered drain mode", ep)
+			}
+
 			// Unknown, so kubernetes can't know the state of it, delete it
 			if state.ObjectRef == nil {
-				glog.Infof("Deleting EP, we don't know the pod name: %+v", ep)
+				glog.Infof("%v: Deleting EP, we don't know the pod name", ep)
 				delete(haproxy.endpoints[backend.Name], ep)
 				continue
 			}
 
 			client := haproxy.controller.GetClient()
 			pod, err := client.CoreV1().Pods(state.ObjectRef.Namespace).Get(state.ObjectRef.Name, meta_v1.GetOptions{})
-			phase := "...unknown..."
-			if err == nil {
-				phase = string(pod.Status.Phase)
+			if err != nil {
+				glog.Infof("%v: Deleting EP, got no response for fetching POD", ep)
+				delete(haproxy.endpoints[backend.Name], ep)
+				continue
 			}
-			glog.Infof("Pod state: %+v phase=%v %v", pod, phase, err)
+
+			glog.Infof("%v: Pod state: %v phase=%v", ep, pod.DeletionTimestamp, pod.Status.Phase)
 		}
 
 	}
 
-	glog.Infof("%+v\n", haproxy.endpoints)
+	//glog.Infof("%+v\n", haproxy.endpoints)
 
 	data, err := haproxy.template.execute(newControllerConfig(&cfg, haproxy.endpoints, haproxy.configMap))
 	if err != nil {

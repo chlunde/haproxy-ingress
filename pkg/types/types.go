@@ -63,8 +63,9 @@ type (
 	}
 
 	EndpointState struct {
-		ObjectRef *api.ObjectReference
-		Weight    int
+		ObjectRef      *api.ObjectReference
+		Weight         int
+		PreviousWeight int
 	}
 
 	EndpointMap map[Endpoint]EndpointState
