@@ -23,6 +23,8 @@ import (
 	"os"
 	"os/exec"
 
+	"strconv"
+
 	"github.com/golang/glog"
 	"github.com/jcmoraisjr/haproxy-ingress/pkg/types"
 	"github.com/jcmoraisjr/haproxy-ingress/pkg/version"
@@ -31,6 +33,7 @@ import (
 	"k8s.io/ingress/core/pkg/ingress"
 	"k8s.io/ingress/core/pkg/ingress/controller"
 	"k8s.io/ingress/core/pkg/ingress/defaults"
+	"k8s.io/ingress/core/pkg/ingress/store"
 )
 
 // HAProxyController has internal data of a HAProxyController instance
@@ -40,7 +43,8 @@ type HAProxyController struct {
 	command    string
 	configFile string
 	template   *template
-	endpoints  map[string]map[types.Endpoint]int
+	endpoints  map[string]types.EndpointMap
+	listers    ingress.StoreLister
 }
 
 // NewHAProxyController constructor
@@ -49,7 +53,7 @@ func NewHAProxyController() *HAProxyController {
 		command:    "/haproxy-wrapper",
 		configFile: "/usr/local/etc/haproxy/haproxy.cfg",
 		template:   newTemplate("haproxy.tmpl", "/usr/local/etc/haproxy/haproxy.tmpl"),
-		endpoints:  make(map[string]map[types.Endpoint]int),
+		endpoints:  make(map[string]types.EndpointMap),
 	}
 }
 
@@ -92,6 +96,7 @@ func (haproxy *HAProxyController) Check(_ *http.Request) error {
 
 // SetListers give access to the store listers
 func (haproxy *HAProxyController) SetListers(l ingress.StoreLister) {
+	haproxy.listers = l
 }
 
 // OverrideFlags allows controller to override command line parameter flags
@@ -117,21 +122,64 @@ func endpointsForBackend(cfg ingress.Configuration, name string) []ingress.Endpo
 	return nil
 }
 
+// Given an endpoint (IP+port pair), locate the endpoint by using the endpoint list store (cache)
+func lookupEndpoint(ep types.Endpoint, eplister store.EndpointLister) *api.ObjectReference {
+	portnumber, err := strconv.Atoi(ep.Port)
+	if err != nil {
+		glog.Errorf("Non-integer port-number? %+v: %v\n", ep, err)
+		return nil
+	}
+
+	glog.Infof("looking up: %+v\n", ep)
+	for _, m := range eplister.List() {
+		eps := *m.(*api.Endpoints)
+		for _, subset := range eps.Subsets {
+			for _, addr := range subset.Addresses {
+				if addr.IP != ep.Address {
+					continue
+				}
+				for _, port := range subset.Ports {
+					if port.Port == int32(portnumber) {
+						glog.Infof("Found targetRef: %+v, %+v, %+v\n", ep, addr.TargetRef, addr.Hostname)
+						return addr.TargetRef
+					}
+				}
+			}
+		}
+	}
+	glog.Infof("Did not find endpoint: %+v\n", ep)
+	return nil
+}
+
 // OnUpdate regenerate the configuration file of the backend
 func (haproxy *HAProxyController) OnUpdate(cfg ingress.Configuration) ([]byte, error) {
 	for _, backend := range cfg.Backends {
 		if _, ok := haproxy.endpoints[backend.Name]; !ok {
-			haproxy.endpoints[backend.Name] = make(map[types.Endpoint]int)
+			haproxy.endpoints[backend.Name] = make(types.EndpointMap)
 		}
+
+		// Remove dummy default 503 endpoint if it exists
+		// This Address/IP pair is from k8s.io/ingress/core/pkg/ingress/controller/util.go
+		// ingress.Endpoint{Address: "127.0.0.1", Port: "8181"}
+		// it will be used when there are no alive endpoints for a service
+		delete(haproxy.endpoints[backend.Name], types.Endpoint{"127.0.0.1", "8181"})
 
 		// Set weight to 0 for all backends
 		for ep, _ := range haproxy.endpoints[backend.Name] {
-			haproxy.endpoints[backend.Name][ep] = 0
+			state := haproxy.endpoints[backend.Name][ep]
+			state.Weight = 0
+			haproxy.endpoints[backend.Name][ep] = state
 		}
 
-		// Set back to 256 for those that are alive
+		// Set back to 256 for those that are alive, potentially adding new endpoints
 		for _, ep := range backend.Endpoints {
-			haproxy.endpoints[backend.Name][types.MapEndpoint(ep)] = 256
+			key := types.NewEndpoint(ep)
+			state := haproxy.endpoints[backend.Name][key]
+			state.Weight = 256
+			if state.ObjectRef == nil {
+				state.ObjectRef = lookupEndpoint(key, haproxy.listers.Endpoint)
+			}
+			haproxy.endpoints[backend.Name][key] = state
 		}
 	}
 

@@ -17,6 +17,7 @@ limitations under the License.
 package types
 
 import (
+	api "k8s.io/client-go/pkg/api/v1"
 	"k8s.io/ingress/core/pkg/ingress"
 	"k8s.io/ingress/core/pkg/ingress/annotations/authtls"
 	"k8s.io/ingress/core/pkg/ingress/annotations/rewrite"
@@ -49,7 +50,7 @@ type (
 		// TODO: add annotation to allow the load of ca certificate
 		Secure bool
 		// Endpoints contains the list of endpoints currently running
-		Endpoints map[Endpoint]int
+		Endpoints EndpointMap
 
 		// StickySession contains the StickyConfig object with stickness configuration
 
@@ -60,6 +61,13 @@ type (
 		Address string
 		Port    string
 	}
+
+	EndpointState struct {
+		ObjectRef *api.ObjectReference
+		Weight    int
+	}
+
+	EndpointMap map[Endpoint]EndpointState
 
 	// HAProxyConfig has HAProxy specific configurations from ConfigMap
 	HAProxyConfig struct {
@@ -102,6 +110,6 @@ type (
 	}
 )
 
-func MapEndpoint(ep ingress.Endpoint) Endpoint {
+func NewEndpoint(ep ingress.Endpoint) Endpoint {
 	return Endpoint{ep.Address, ep.Port}
 }

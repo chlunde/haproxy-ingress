@@ -29,7 +29,7 @@ import (
 	"k8s.io/ingress/core/pkg/ingress/defaults"
 )
 
-func newControllerConfig(cfg *ingress.Configuration, endpoints map[string]map[types.Endpoint]int, configMap *api.ConfigMap) *types.ControllerConfig {
+func newControllerConfig(cfg *ingress.Configuration, endpoints map[string]types.EndpointMap, configMap *api.ConfigMap) *types.ControllerConfig {
 	userlists := newUserlists(cfg.Servers)
 	haHTTPServers, haHTTPSServers, haDefaultServer := newHAProxyServers(userlists, cfg.Servers)
 	conf := types.ControllerConfig{
